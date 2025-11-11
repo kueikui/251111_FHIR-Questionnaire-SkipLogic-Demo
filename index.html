@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>FHIR Questionnaire Skip Logic Demo</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      background-color: #fafafa;
+      color: #333;
+      text-align: center;
+      padding: 60px;
+    }
+    h1 {
+      color: black;
+      font-size: 28px;
+    }
+    .button {
+      display: inline-block;
+      margin: 20px;
+      padding: 14px 28px;
+      font-size: 18px;
+      background-color: #f6c8a7;
+      color: #fff;
+      border-radius: 8px;
+      text-decoration: none;
+      transition: background 0.3s;
+      color: black;
+    }
+    .button:hover {
+      background-color: #005fa3;
+    }
+  </style>
+</head>
+<body>
+  <h1>運動問卷_跳題版</h1>
+
+  <a class="button" href="跳題問卷/Questionnaire.html">上傳CSV檔</a>
+  <a class="button" href="跳題問卷/postPatient.html">建立patient資訊</a>
+  <a class="button" href="跳題問卷/QuestionnaireResponse.html">填寫問卷</a>
+  <a class="button" href="跳題問卷/getBundle2.html">查看問卷回應</a>
+</body>
+</html>
