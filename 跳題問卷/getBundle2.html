@@ -1,0 +1,320 @@
+﻿<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<title>Get FHIR Resource</title>
+<script src="setting.js"></script>
+<script src="HTTP2024.js"></script>
+<style>
+    #Title {
+  margin: 20px auto;
+  padding: 20px 30px;
+  width: 90%;
+  border-left: 10px solid #ff6a00;
+  background-color: #fef4ea; /* 淡橘背景 */
+  font-size: 32px;
+  font-weight: bold;
+  color: #333;
+}
+
+#PatientID {
+  padding: 12px 15px;
+  width: 40%;
+  font-size: 18px;
+  border: 2px solid #ff6a00;
+  border-radius: 4px;
+  box-shadow: 1px 1px 5px rgba(0,0,0,0.1);
+}
+#InputBlock {
+  margin: 20px auto;
+  width: 90%;
+}
+#Button2 {
+  display: inline-block;
+  margin: 20px 0;
+  padding: 12px 30px;
+  font-size: 18px;
+  font-weight: bold;
+  color: white;
+  margin-left: 100px;
+  background-color: #dfa176;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  transition: background-color 0.3s ease, transform 0.2s ease;
+}
+
+#Button2:hover {
+  background-color: #e65c00;
+  transform: translateY(-2px);
+}
+/* === 共用容器 === */
+.custom-table-container {
+    overflow-x: auto;
+    margin-top: 10px;
+    max-width: 100%;
+}
+
+/* === 共用表格 === */
+table.custom-table {
+    border-collapse: collapse;
+    width: 100%;
+    table-layout: fixed;
+    font-family: Arial, sans-serif;
+}
+
+table.custom-table th, table.custom-table td {
+    border: 1px solid #ccc;
+    padding: 8px 12px;
+    word-break: break-word;
+    white-space: normal;
+}
+
+table.custom-table th {
+    background-color: #f0f0f0;
+}
+
+table.custom-table tr:nth-child(even) {
+    background-color: #fafafa;
+}
+
+table.custom-table tr.section-header td {
+    background-color: #e6f7ff;
+    font-weight: bold;
+}
+
+/* === 左邊列表：對齊中，欄寬比例 === */
+#ResultTableContainer table.custom-table th,
+#ResultTableContainer table.custom-table td {
+    text-align: center;
+}
+
+#ResultTableContainer table.custom-table th:nth-child(1),
+#ResultTableContainer table.custom-table td:nth-child(1) {
+    width: 30%;
+}
+#ResultTableContainer table.custom-table th:nth-child(2),
+#ResultTableContainer table.custom-table td:nth-child(2) {
+    width: 50%;
+}
+#ResultTableContainer table.custom-table th:nth-child(3),
+#ResultTableContainer table.custom-table td:nth-child(3) {
+    width: 20%;
+}
+
+/* === 右邊細節：對齊左，欄寬比例 === */
+#ResultTableContainer2 table.custom-table th,
+#ResultTableContainer2 table.custom-table td {
+    text-align: left;
+}
+
+#ResultTableContainer2 table.custom-table th:nth-child(1),
+#ResultTableContainer2 table.custom-table td:nth-child(1) {
+    width: 10%;
+}
+#ResultTableContainer2 table.custom-table th:nth-child(2),
+#ResultTableContainer2 table.custom-table td:nth-child(2) {
+    width: 60%;
+}
+#ResultTableContainer2 table.custom-table th:nth-child(3),
+#ResultTableContainer2 table.custom-table td:nth-child(3) {
+    width: 30%;
+}
+</style>
+</head>
+<body>
+    <div id="Title">Get 問卷回應</div>
+    <div id="InputBlock">
+        <label for="PatientID">請輸入患者ID:</label>
+        <input type="text" id="PatientID" /><!--輸入病患ID-->
+        <input id="Button2" onclick="getData()" type="button" value="Get data" /><!--取得該名病患填寫過問卷按鈕-->
+    </div>
+    <div id="Step4" class="Step">
+        <div class="Content">
+            
+            <div style="display: flex; gap: 20px; flex-wrap: wrap; ">
+                <!--顯示所有填寫問卷區域-->
+                <div style="flex: 2; min-width: 300px; margin-left: 100px;">
+                    <div id="ResultTableContainer"></div>
+                </div>
+
+                <!--顯示某筆問卷詳細資料區域-->
+                <div style="flex: 3; min-width: 300px; margin-right: 100px;">
+                    <div id="ResultTableContainer2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        //查詢該病患的所有問卷回應
+        function getData() {
+            const PatientID = document.getElementById("PatientID").value;
+            const apiURL = "https://hapi.fhir.tw/fhir/QuestionnaireResponse?subject=Patient/" + PatientID;//?subject=Patient/{ID} → 查找這個人填過的所有問卷回應
+            sendHttpGet(apiURL, callBack);//發送請求到server
+        }
+
+        //顯示所選取的問卷回應詳細資料
+        function getQu_ResInfo(Qu_ResID) {
+            const apiURL = "https://hapi.fhir.tw/fhir/QuestionnaireResponse/" + Qu_ResID;
+            sendHttpGet(apiURL, callBack2);//向 FHIR Server 取得單筆回應詳細資料
+        }
+
+        //處理查詢回來的問卷回應清單
+        function callBack(ret) {
+            const bundle = JSON.parse(ret);
+            if (bundle.resourceType === "Bundle") {//判斷resourceType是否為 Bundle
+                const entryCount = bundle.entry.length//bundle.entry 是所有問卷回應列表，抓取其長度代表有幾筆
+                let output = `
+                <div class="custom-table-container">
+                <table class="custom-table">
+                    <thead>
+                        <tr>
+                            <th>問卷回應ID</th>
+                            <th>創建日期</th>
+                            <th>查看</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+                //逐筆取得問卷回應 ID、回應時間，製作表格列
+                for (let i = 0; i < entryCount; i++) {
+                    const thisResource = bundle.entry[i].resource;
+                    const questionnaireResponse_id = thisResource.id;
+                    const rawDate = thisResource.authored;
+                    const dateObj = new Date(rawDate);
+                    const create_date = `${dateObj.getFullYear()}年${String(dateObj.getMonth() + 1).padStart(2, '0')}月${String(dateObj.getDate()).padStart(2, '0')}日 ${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}:${String(dateObj.getSeconds()).padStart(2, '0')}`;
+
+                    //<button onclick="getQu_ResInfo('${questionnaireResponse_id}')">查看</button>點擊後跳轉到getQu_ResInfo(id)
+                    output += `
+                        <tr>
+                            <td>${questionnaireResponse_id}</td>
+                            <td>${create_date}</td>
+                            <td><button onclick="getQu_ResInfo('${questionnaireResponse_id}')">查看</button></td>
+                        </tr>`;
+                }
+
+                output += `</tbody></table>`;
+                document.getElementById("ResultTableContainer").innerHTML = output;
+            }
+        }
+
+        //顯示問卷詳細內容與所有答案
+        function callBack2(ret) {
+            const bundle = JSON.parse(ret);
+            if (bundle.resourceType !== "QuestionnaireResponse") return;
+
+            const rawDate = bundle.meta.lastUpdated;
+            const dateObj = new Date(rawDate);
+            const create_date = `${dateObj.getFullYear()}年${String(dateObj.getMonth() + 1).padStart(2, '0')}月${String(dateObj.getDate()).padStart(2, '0')}日 ${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}:${String(dateObj.getSeconds()).padStart(2, '0')}`;
+
+            let output = `
+            <div class="custom-table-container">
+            <table class="custom-table">
+                <tr>
+                    <th>問卷回應ID</th>
+                    <td colspan="2">${bundle.id}</td>
+                </tr>
+                <tr>
+                    <th>回應時間</th>
+                    <td colspan="2">${create_date}</td>
+                </tr>
+                <tr>
+                    <th>問題ID</th>
+                    <th>問題內容</th>
+                    <th>答案</th>
+                </tr>`;
+
+
+            //每一筆問卷回應中，會有一個 item 陣列，代表每一題的內容
+            const items = bundle.item || [];
+            for (let i = 0; i < items.length; i++) {
+                const thisItem = items[i];
+                const thisLinkId = thisItem.linkId;
+                const thisTest = thisItem.text || "";
+
+                //若是題組（巢狀），再繼續往下抓子題的答案
+                if (thisItem.item && thisItem.item.length > 0) {
+                    output += `
+                        <tr style="background-color:#f0f0f0;">
+                            <td><b>${thisLinkId}</b></td>
+                            <td colspan="2"><b>${thisTest}</b></td>
+                        </tr>`;
+                    for (let k = 0; k < thisItem.item.length; k++) {//抓子題item
+                        const subItem = thisItem.item[k];
+                        const subLinkId = subItem.linkId;
+                        const subText = subItem.text || "";
+                        let subAnswerText = "";
+
+                        const subAnswers = subItem.answer || [];
+
+                        //針對不同型別進行轉換顯示
+                        for (let m = 0; m < subAnswers.length; m++) {
+                            const subAns = subAnswers[m];
+                            if (subAns.valueBoolean !== undefined) {
+                                if(subAns.valueBoolean === true || subAns.valueBoolean === 'true'){
+                                subAnswerText += "是" + "<br>";
+                            }
+                            else{
+                                subAnswerText += "否" + "<br>";
+                            }
+                            //subAnswerText += subAns.valueBoolean + "<br>";
+                            } 
+                            else if (subAns.valueString !== undefined) {
+                                subAnswerText += subAns.valueString + "<br>";
+                            } 
+                            else if (subAns.valueCoding?.display !== undefined) {
+                                subAnswerText += subAns.valueCoding.display + "<br>";
+                            } 
+                            else if (subAns.valueInteger !== undefined) {
+                                subAnswerText += subAns.valueInteger + "<br>";
+                            }
+                        }
+
+                        output += `
+                            <tr>
+                                <td style="padding-left:30px;">${subLinkId}</td>
+                                <td>${subText}</td>
+                                <td>${subAnswerText}</td>
+                            </tr>`;
+                    }
+                } 
+                else {//不是群組題
+                    let answerText = "";
+                    const answers = thisItem.answer || [];
+                    for (let j = 0; j < answers.length; j++) {
+                        const ans = answers[j];
+                        //針對不同型別進行轉換顯示               
+                        if (ans.valueBoolean !== undefined) {
+                            if(ans.valueBoolean === "true"){
+                                answerText += "是" + "<br>";
+                            }
+                            else{
+                                answerText += "否" + "<br>";
+                            }
+                            //answerText += ans.valueBoolean + "<br>";
+                        } else if (ans.valueString !== undefined) {
+                            answerText += ans.valueString + "<br>";
+                        } else if (ans.valueCoding?.display !== undefined) {
+                            answerText += ans.valueCoding.display + "<br>";
+                        } else if (ans.valueInteger !== undefined) {
+                            answerText += ans.valueInteger + "<br>";
+                        }
+                    }
+
+                    output += `
+                        <tr>
+                            <td>${thisLinkId}</td>
+                            <td>${thisTest}</td>
+                            <td>${answerText}</td>
+                         </tr>`;
+        }
+    }
+
+    output += `</table>`;
+    document.getElementById("ResultTableContainer2").innerHTML = output;//顯示在網頁上
+}
+ </script>
+</body>
+</html>

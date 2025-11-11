@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <title>Questionnaire Upload</title>
+
+  <!-- 引入 PapaParse 用來解析 CSV -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+  <!-- 自行依需要引用函式庫 -->
+  <script src="setting.js"></script>
+  <script src="Cookie.js"></script>
+  <script src="dateTime.js"></script>
+  <script src="HTTP2024.js"></script>
+
+  <script>
+    var jsonObj = {
+      "resourceType": "Questionnaire",
+      "id": "Scen4Questionnaire",
+      "url": "https://",
+      "version": "1.0.1",
+      "status": "active",
+      "subjectType": ["Patient"],
+      "date": "2024-03-12T17:26:10+00:00",
+      "publisher": "Example Publisher",
+      "contact": [{
+        "name": "ExampleQuestionnaire",
+        "telecom": [{
+          "system": "url",
+          "value": "http://www.hl7.org/Special/committees/patientcare"
+        }]
+      }],
+      "jurisdiction": [{
+        "coding": [{
+          "system": "urn:iso:std:iso:3166",
+          "code": "US"
+        }]
+      }],
+      "item": []
+    };
+
+    function handleCSV(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+          const data = results.data;
+          const itemMap = {};
+
+          // 1. 將每一題建立為 item 物件
+          data.forEach(row => {
+            let score = 0;
+            const item = {
+              linkId: row.linkId,
+              text: row.text,
+              type: mapType(row.type)
+            };
+
+            // 解析選項
+            if (item.type === "choice" && row.answerOption) {
+              item.answerOption = row.answerOption.split(";").map(opt => ({
+                valueCoding: {
+                  display: opt.trim(),
+                  //code: (score++).toString().toLowerCase()
+                }
+              }));
+            }
+
+            // 多選要加 repeats
+            if (row.type.trim() === "多選題") {
+              item.repeats = true;
+            }
+
+            // enableWhen
+            if (row.enableWhenQuestion && row.enableWhenOperator && row.enableWhenAnswerCode) {
+              item.enableWhen = [{
+                question: row.enableWhenQuestion.trim(),
+                operator: row.enableWhenOperator.trim(),
+                answerCoding: {
+                  display: row.enableWhenAnswerCode.trim(),
+                  //code: row.enableWhenAnswerCode.trim().toLowerCase()
+                }
+              }];
+            }
+
+            itemMap[row.linkId] = item;
+          });
+
+          // 2. 組織階層（群組與子題）
+          jsonObj.item = [];
+          data.forEach(row => {
+            const item = itemMap[row.linkId];
+            const parentId = row.parentLinkId;
+            if (parentId) {
+              const parent = itemMap[parentId];
+              if (!parent.item) parent.item = [];
+              parent.item.push(item);
+            } else {
+              jsonObj.item.push(item);
+            }
+          });
+
+          loadQuestions();
+        }
+      });
+    }
+
+    function mapType(typeText) {
+      switch (typeText.trim()) {
+        case "單選題": return "choice";
+        case "多選題": return "choice";
+        case "是非題": return "boolean";
+        case "數字題": return "integer";
+        case "文字題": return "string";
+        case "群組": return "group";
+        default: return "string";
+      }
+    }
+
+    function loadQuestions() {
+      const container = document.getElementById('questionnaire');
+      container.innerHTML = "";
+
+      function renderItems(items, indent = 0) {
+        items.forEach(item => {
+          const div = document.createElement('div');
+          div.style.marginLeft = indent + 'em';
+          div.style.marginBottom = '0.5em';
+
+          let text = `${item.linkId}. ${item.text}`;
+
+          if (item.enableWhen) {
+            const condition = item.enableWhen.map(cond =>
+              `【當 ${cond.question} ${cond.operator} ${cond.answerCoding.display} 時顯示】`
+            ).join(" 且 ");
+            text += ` ${condition}`;
+          }
+
+          div.innerText = text;
+          container.appendChild(div);
+
+          // 遞迴處理群組題目
+          if (item.type === "group" && item.item) {
+            renderItems(item.item, indent + 2);
+          }
+        });
+      }
+
+      renderItems(jsonObj.item);
+    }
+
+    function postData() {
+      const jsonStr = JSON.stringify(jsonObj, null, 2);
+      const apiURL = FHIRrootURL + "Questionnaire";
+      sendHttpPost(apiURL, jsonStr, callBack);
+    }
+
+    function callBack(ret) {
+      console.log(ret);
+      displayResponse(ret);
+    }
+
+    function displayResponse(response) {
+      const container = document.getElementById('response');
+      container.innerHTML = "<pre>" + JSON.stringify(JSON.parse(response), null, 2) + "</pre>";
+    }
+  </script>
+</head>
+<body>
+  <h2>問卷 CSV 上傳 → FHIR Questionnaire 建立</h2>
+  <p>請選擇問卷 CSV 檔</p>
+  <input type="file" id="csvFile" accept=".csv" onchange="handleCSV(event)" /><br /><br />
+
+  <div id="questionnaire" style="margin-bottom: 20px; font-family: sans-serif;"></div>
+
+  <input type="button" value="上傳至 FHIR Server" onclick="postData()" /><br />
+
+  <div id="response" style="margin-top: 20px;"></div>
+</body>
+</html>

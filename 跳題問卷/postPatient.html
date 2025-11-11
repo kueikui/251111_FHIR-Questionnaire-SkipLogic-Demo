@@ -1,0 +1,80 @@
+﻿<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Post patient</title>
+
+    <script src="setting.js"></script>
+    <script src="HTTP2024.js"></script>
+    <script>
+        // 建立一個初始的 FHIR Patient JSON 格式
+        var myObj = {
+            "resourceType": "Patient",
+            "name": [
+                {
+                    "text": "",
+                    "family": "",
+                    "given": [""]
+                }
+            ],
+            "gender": "",
+            "birthDate": "",
+            "managingOrganization": {
+                "reference": "Organization/3838"//目前組織暫定 https://hapi.fhir.tw/fhir/Organization/3838
+            }
+        };
+
+        function postData() {//抓取網頁上輸入的資料，帶入 myObj 中對應的位置
+            myObj.name[0].family = document.getElementById("familyName").value;
+            myObj.name[0].given[0] = document.getElementById("givenName").value;
+            myObj.name[0].text = myObj.name[0].family + myObj.name[0].given[0];
+            myObj.birthDate = document.getElementById("birthDate").value;
+
+            //性別選項判斷
+            if (document.getElementById("genderMale").checked == true) {
+                myObj.gender = "male";
+            } else if (document.getElementById("genderFemale").checked == true) {
+                myObj.gender = "female";
+            }
+
+            var jsonStr = JSON.stringify(myObj); // 將 JS 物件轉成 JSON 字串
+            var apiURL = FHIRrootURL + "Patient";// 組成 API URL，例如：https://hapi.fhir.tw/fhir/Patient
+            sendHttpPost(apiURL, jsonStr, callBack);//送出HTTP POST請求(HTTP2024.js)
+        }
+
+        // 當伺服器回應時的 callback 函式
+        function callBack(ret) {
+            console.log(ret);// 輸出回傳內容到 console
+            displayResponse(ret);// 顯示在頁面上
+        }
+
+        // 將 JSON 回應格式化後顯示到畫面上
+        function displayResponse(response) {
+            var responseContainer = document.getElementById('response');
+            responseContainer.innerHTML = "<pre>" + JSON.stringify(JSON.parse(response), null, 2) + "</pre>";
+        }
+
+    </script>
+
+</head>
+<body style="height: 780px">
+    <!-- 送出按鈕 -->
+    <input id="Button1" onclick="postData()" type="button" value="postData" /> <br />
+    <br />
+
+    Family name: <input type="text" id="familyName" />  <br /> <br />
+    Given name: <input type="text" id="givenName" />  <br />
+    <br />
+    Gender: <br />
+    男<input type="radio" name="gender" id="genderMale"><br />
+    女<input type="radio" name="gender" id="genderFemale">
+    <br /><br />
+    Birth Date: <input type="text" id="birthDate" /> Eg. 1924-10-10 <br />
+    <br />
+
+    <!-- 顯示回傳結果 -->
+    <div id="output"></div>
+    <div id="response" style="margin-top: 20px;"></div>
+</body>
+
+</html>

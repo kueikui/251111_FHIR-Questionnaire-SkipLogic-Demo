@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>FHIR 問卷填寫（支援跳題 + 保留答案）</title>
+  <script src="setting.js"></script>
+  <script src="HTTP2024.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .question { margin-bottom: 1em; padding: 0.5em; border-left: 3px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h2>FHIR 問卷填寫</h2>
+
+  <label>Questionnaire ID: </label>
+  <input type="text" id="questionnaire-id" />
+  <button onclick="loadQuestionnaire()">載入問卷</button><br><br>
+
+  <label>病人 ID: </label>
+  <input type="text" id="patient-id" /><br><br>
+
+  <div id="questionnaire-container"></div>
+  <button id="next-button" onclick="showNextQuestion()" style="display:none;">下一題</button>
+  <button id="submit-button" onclick="submitResponse()" style="display:none;">送出回應</button>
+  <label id="alert" style="color: red;"></label>
+  <p id="result"></p>
+  <p id="result-situation"></p>
+
+  <div id="response-container"></div>
+
+  <script>
+    let questionnaire = null;
+    let answers = {}; // 使用者填寫結果暫存
+    let flatItems = [];//把題目展開成陣列
+    let currentIndex = 0;//現在在哪一提
+    let missing = []; // 用來記錄未填答的題目
+    let score = []; // 用來記錄分數
+    let sum = 0; // 用來記錄總分
+
+    //載入問卷
+    function loadQuestionnaire() {
+      // 清空先前資料
+      document.getElementById("alert").innerHTML = "";
+      document.getElementById("response-container").innerHTML = "";
+      document.getElementById("questionnaire-container").innerHTML = "";
+      answers = {};  
+      score = {};
+      flatItems = [];
+      currentIndex = 0;
+      missing = [];
+      document.getElementById("next-button").style.display = "none";
+      document.getElementById("submit-button").style.display = "none";
+
+      console.log(answers, currentIndex, "/", flatItems.length);
+      
+      const qid = document.getElementById('questionnaire-id').value;// 取得問卷ID
+      const pid = document.getElementById('patient-id').value;// 取得問卷ID
+      
+      if(!qid || !pid){
+        document.getElementById("alert").innerHTML="問卷ID或病患ID不可為空";
+        return;
+      }
+
+      //向 FHIR Server 發出 GET 請求，取得指定 ID 的問卷
+      sendHttpGet(`${FHIRrootURL}Questionnaire/${qid}`, function (ret) {
+        questionnaire = JSON.parse(ret);
+        flatItems = flattenItems(questionnaire.item);
+        currentIndex = 0;
+
+        //flattenItems結構
+        console.log('Flattened Items:', flatItems.map(i => ({
+          linkId: i.linkId,
+          text: i.text,
+          type: i.type
+        })));
+        showNextQuestion();
+        document.getElementById('next-button').style.display = 'inline-block';
+       
+      });
+    }
+
+    // 判斷問題是否需要顯示 (支援 enableWhen)
+    function shouldDisplay(item) {
+      if (!item.enableWhen) return true;// 若無 enableWhen 條件，預設顯示
+      return item.enableWhen.every(cond => {// 有enablewhen條件，條件滿足，才會顯示該題目
+        const prev = answers[cond.question];// 取得前面問題的答案
+        if (prev === undefined || prev === null) return false;// 若無答案則不顯示
+        return prev === cond.answerCoding.display || prev === cond.answerCoding.code;//若前面回答的內容等於條件中的顯示值或代碼，則視為符合條件
+      });
+    }
+
+    function flattenItems(items) {
+      let result = [];
+      items.forEach(item => {
+        result.push(item);  // 先放自己（包括群組題目本身）
+        if (item.type === 'group' && item.item) {//子題
+          result = result.concat(flattenItems(item.item));
+        }
+      });
+      return result;
+    }
+
+    //顯示下一題
+    function showNextQuestion() {
+      const container = document.getElementById('questionnaire-container');
+      container.innerHTML = '';
+
+      //跳過不應該顯示的題目，直到找到第一個應該顯示的題目為止
+      while (currentIndex < flatItems.length && !shouldDisplay(flatItems[currentIndex])) {
+        currentIndex++;
+      }
+      
+      // 如果已超過題目數，清空畫面並隱藏下一題按鈕，顯示送出按鈕
+      if (currentIndex >= flatItems.length) {
+        container.innerHTML = '<p>已完成所有題目，請按下方送出按鈕。</p>';
+        document.getElementById('next-button').style.display = 'none';
+        document.getElementById('submit-button').style.display = 'inline-block';
+        return;
+      }
+
+      const item = flatItems[currentIndex];
+
+
+      // 如果是群組題，則一次顯示該群組內所有子題
+      if (item.type === 'group' && item.item) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'question';
+
+        // 顯示群組標題
+        const groupLabel = document.createElement('div');
+        groupLabel.innerHTML = `<em>${item.text}</em>`;//<strong>${item.linkId}</strong>. 省略編號
+        wrapper.appendChild(groupLabel);
+
+        // 顯示所有子題
+        item.item.forEach(subItem => {
+          if (!shouldDisplay(subItem)) return;
+
+          const subWrapper = document.createElement('div');
+          subWrapper.className = 'question';
+          const label = document.createElement('div');
+          label.innerHTML = `${subItem.text}`;//<strong>${subItem.linkId}</strong>.省略編號
+          subWrapper.appendChild(label);
+
+          if (subItem.type === 'boolean') {
+            ['是', '否'].forEach(val => {
+              const input = document.createElement('input');
+              input.type = 'radio';
+              input.name = `q_${subItem.linkId}`;
+              input.value = val;
+              input.checked = answers[subItem.linkId] === val;
+              input.onchange = () => {
+                answers[subItem.linkId] = val;
+              };
+              const span = document.createElement('span');
+              span.appendChild(input);
+              span.appendChild(document.createTextNode(val));
+              subWrapper.appendChild(span);
+            });
+          } else if (subItem.type === 'choice') {
+            const isRepeats = subItem.repeats === true || subItem.repeats === 'true';
+
+            subItem.answerOption.forEach(opt => {
+              const display = opt.valueCoding.display;
+              const input = document.createElement('input');
+              input.type = isRepeats ? 'checkbox' : 'radio';
+              input.name = `q_${subItem.linkId}`;
+              input.value = display;
+
+              if (isRepeats) {
+                if (Array.isArray(answers[subItem.linkId]) && answers[subItem.linkId].includes(display)) {
+                  input.checked = true;
+                }
+              } else {
+                if (answers[subItem.linkId] === display) {
+                  input.checked = true;
+                }
+              }
+
+              if (isRepeats) {
+                input.onchange = () => {
+                  const checkboxes = document.querySelectorAll(`[name='q_${subItem.linkId}']:checked`);
+                  answers[subItem.linkId] = Array.from(checkboxes).map(cb => cb.value);
+                };
+              } else {
+                input.onchange = () => {
+                  answers[subItem.linkId] = display;
+                };
+              }
+
+              const label = document.createElement('label');
+              label.appendChild(input);
+              label.appendChild(document.createTextNode(display));
+              subWrapper.appendChild(label);
+              subWrapper.appendChild(document.createElement('br'));
+            });
+          } else if (subItem.type === 'integer' || subItem.type === 'string') {
+            const input = document.createElement('input');
+            input.type = subItem.type === 'integer' ? 'number' : 'text';
+            input.value = answers[subItem.linkId] || '';
+            input.onchange = () => {
+              answers[subItem.linkId] = input.value;
+            };
+            subWrapper.appendChild(input);
+          }
+          wrapper.appendChild(subWrapper);
+        });
+
+        container.appendChild(wrapper);
+        // 設定下一題按鈕事件：群組題的 currentIndex 要跳過整個群組（包含子題數量）
+        document.getElementById('next-button').onclick = () => {
+        // 檢查群組中所有該顯示子題是否都有作答
+        missing = item.item.filter(subItem => {
+        if (!shouldDisplay(subItem)) return false;
+          const val = answers[subItem.linkId];
+          // 空字串、undefined、null 視為未填答
+          return val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0);
+        });
+        if (missing.length > 0) {
+          document.getElementById("alert").innerHTML = "請完成所有子題再進行下一題";
+          return;
+        }
+          // 清除警告訊息
+          document.getElementById("alert").innerHTML = "";
+          // 跳過群組題目本身和所有子題
+          currentIndex += (1 + item.item.length);
+          console.log("目前 index (群組)：", currentIndex, "/", flatItems.length);
+          showNextQuestion();
+        };
+      } 
+      else {
+        // 非群組
+        const wrapper = document.createElement('div');
+        wrapper.className = 'question';
+          
+        const label = document.createElement('div');
+        label.innerHTML = `${item.text}`;//<strong>${item.linkId}</strong>.省略題號
+        wrapper.appendChild(label);
+        if (item.type === 'boolean') {
+          ['是', '否'].forEach(val => {
+            const input = document.createElement('input');
+            input.type = 'radio';
+            input.name = `q_${item.linkId}`;
+            input.value = val;
+            input.onchange = () => {
+              answers[item.linkId] = val;
+              //currentIndex++;
+              //showNextQuestion();
+            };
+            const span = document.createElement('span');
+            span.appendChild(input);
+            span.appendChild(document.createTextNode(val));
+            wrapper.appendChild(span);
+          });
+        }
+        else if (item.type === 'choice') {
+          const isRepeats = item.repeats === true || item.repeats === 'true';
+            
+          item.answerOption.forEach(opt => {
+            const display = opt.valueCoding.display;
+            const code = opt.valueCoding.code;
+            const input = document.createElement('input');
+            input.type = isRepeats ? 'checkbox' : 'radio';
+            input.name = `q_${item.linkId}`;
+            input.value = display;
+            input.code = code;
+
+            // 回填先前的答案（保留填答）
+            if (isRepeats) {
+              if (Array.isArray(answers[item.linkId]) && answers[item.linkId].includes(display)) {
+                input.checked = true;
+              }
+            } else {
+              if (answers[item.linkId] === display) {
+                input.checked = true;
+              }
+            }
+
+            // 設定事件處理
+            if (isRepeats) {
+              input.onchange = () => {
+                const checkboxes = document.querySelectorAll(`[name='q_${item.linkId}']:checked`);
+                answers[item.linkId] = Array.from(checkboxes).map(cb => cb.value);
+                score[item.linkId] = code; // 儲存分數
+                //currentIndex++;
+                console.log("目前 index(isRepeats)：", currentIndex, "/", flatItems.length);
+              };
+            } else {
+              input.onchange = () => {
+                answers[item.linkId] = display;
+                score[item.linkId] = code; // 儲存分數
+                //currentIndex++;
+              };
+            }
+            // 建立顯示文字
+            const label = document.createElement('label');
+            label.appendChild(input);
+            label.appendChild(document.createTextNode(display));
+            wrapper.appendChild(label);
+            wrapper.appendChild(document.createElement('br'));
+          });
+        } 
+        else if (item.type === 'integer' || item.type === 'string') {
+          const input = document.createElement('input');
+          input.type = item.type === 'integer' ? 'number' : 'text';
+          input.value = answers[item.linkId] || '';
+          input.onchange = () => {
+            answers[item.linkId] = input.value;
+            //currentIndex++;
+          };
+          wrapper.appendChild(input);       
+        }
+        container.appendChild(wrapper);
+
+        // 下一題按鈕點擊事件：非群組題的 currentIndex 遞增邏輯
+        document.getElementById('next-button').onclick = () => {
+          // 檢查該題是否有作答
+          const val = answers[item.linkId];
+          if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) {
+            document.getElementById("alert").innerHTML = "請作答後再進行下一題";
+            return;
+          }
+
+          document.getElementById("alert").innerHTML = "";
+
+          currentIndex++;
+          console.log("目前 index (單題)：", currentIndex, "/", flatItems.length);
+          showNextQuestion();
+        };
+        
+      }
+    }
+         
+    // 送出答案
+    function submitResponse() {
+      const questionnaireId = document.getElementById('questionnaire-id').value;//取得問卷ID
+      const patientId = document.getElementById('patient-id').value;;//取得病患ID
+
+      // 建立 QuestionnaireResponse
+      const response = {
+        resourceType: "QuestionnaireResponse",
+        questionnaire: `Questionnaire/${questionnaireId}`,
+        subject: { reference: `Patient/${patientId}` },
+        authored: new Date().toISOString(),
+        status: "completed",
+        item: buildResponseItems(questionnaire.item)
+      };
+
+      //POST到 FHIR Server
+      sendHttpPost(`${FHIRrootURL}QuestionnaireResponse`, JSON.stringify(response), callBack);
+      
+      //document.getElementById("result").innerText = "分數總和 :" + sum;
+      //if (sum >= 0 && sum < 10) {
+        //document.getElementById("result-situation").innerText = "結果：正常";
+      //} else if (sum >= 10 && sum < 20) {
+        //document.getElementById("result-situation").innerText = "結果：輕度憂鬱";
+      //} else if (sum >= 20 && sum < 30) {
+        //document.getElementById("result-situation").innerText = "結果：中度憂鬱";
+      //} else {
+        //document.getElementById("result-situation").innerText = "結果：重度憂鬱";
+      //}
+    }
+
+    // 構建答案 JSON 格式
+    function buildResponseItems(items) {
+      return items.map(item => {
+        if (!shouldDisplay(item)) return null;
+
+        if (item.type === 'group' && item.item) {//群組會再遞迴執行
+          const childItems = buildResponseItems(item.item).filter(Boolean);
+          if (childItems.length === 0) return null;//如果該題依照條件顯示，則不送出
+          return {
+            linkId: item.linkId,
+            text: item.text,
+            item: childItems
+          };
+        }
+
+        const val = answers[item.linkId];// 使用者作答的值
+
+        const link_score = score[item.linkId];// 使用者作答的分數
+
+        if (val === undefined || val === null || val === '') return null;
+
+        const answer = [];
+
+        //將答案轉為正確的 FHIR value[x] 格式
+        if (Array.isArray(val)) {
+          val.forEach(v => 
+          answer.push({ valueCoding: { display: v } }));
+        } else if (item.type === 'boolean') {
+          answer.push({ valueBoolean: val === '是' });
+        } else if (item.type === 'choice') {
+          answer.push({ valueCoding: { display: val , code: link_score } });
+          sum+=parseInt(link_score); // 累加分數
+        } else if (item.type === 'integer') {
+          answer.push({ valueInteger: val });
+        } else {
+          answer.push({ valueString: val });
+        }
+
+        return {
+          linkId: item.linkId,
+          text: item.text,
+          answer
+        };
+      }).filter(Boolean);
+    }
+
+    //回傳結果顯示在畫面上
+    function callBack(ret) {
+      const json = JSON.parse(ret);
+      document.getElementById('response-container').innerHTML =
+        `<pre>${JSON.stringify(json, null, 2)}</pre>`;
+    }
+  </script>
+</body>
+</html>
