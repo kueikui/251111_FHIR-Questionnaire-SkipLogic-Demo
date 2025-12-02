@@ -43,6 +43,7 @@
 1. 開啟首頁  
  [https://kueikui.github.io/251111_FHIR-Questionnaire-SkipLogic-Demo/](https://kueikui.github.io/251111_FHIR-Questionnaire-SkipLogic-Demo/)
 2. 選擇想要查看的頁面：
+   - 下載csv範例檔
    - 上傳問卷CSV檔（Questionnaire.html）
    - 建立patient資訊(Patient.html)
    - 填寫問卷（QuestionnaireResponse.html）  
